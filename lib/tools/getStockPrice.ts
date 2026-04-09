@@ -1,9 +1,7 @@
 import { tool } from "ai";
-import YahooFinance from "yahoo-finance2";
-const yahooFinance = new YahooFinance({
-    suppressNotices: ["yahooSurvey"],
-});
 import { z } from "zod";
+
+import { yahooFinance } from "./yahooFinance";
 
 type YahooQuote = {
     symbol?: string | null;

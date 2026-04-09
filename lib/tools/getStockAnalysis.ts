@@ -1,9 +1,7 @@
 import { tool } from "ai";
-import YahooFinance from "yahoo-finance2";
-const yahooFinance = new YahooFinance({
-    suppressNotices: ["yahooSurvey"],
-});
 import { z } from "zod";
+
+import { yahooFinance } from "./yahooFinance";
 
 type QuoteSummaryResult = {
     defaultKeyStatistics?: {
@@ -19,6 +17,9 @@ type QuoteSummaryResult = {
     summaryDetail?: {
         dividendYield?: number | null;
         averageVolume?: number | null;
+        fiftyTwoWeekHigh?: number | null;
+        fiftyTwoWeekLow?: number | null;
+        marketCap?: number | null;
     } | null;
     recommendationTrend?: {
         trend?: Array<{
@@ -40,6 +41,10 @@ type QuoteSummaryResult = {
 
 type HistoricalEntry = {
     close?: number | null;
+};
+
+type ChartResult = {
+    quotes?: HistoricalEntry[];
 };
 
 const toNumber = (value: unknown) => {
@@ -93,6 +98,63 @@ const calculateRSI14 = (closes: number[]) => {
     return 100 - 100 / (1 + relativeStrength);
 };
 
+const formatLevel = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) {
+        return "N/A";
+    }
+    return `₹${value.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
+};
+
+const getRecentCloses = async (symbol: string) => {
+    const period2 = new Date();
+    const period1 = new Date();
+    period1.setDate(period2.getDate() - 90);
+
+    try {
+        const chart = (await (
+            yahooFinance.chart as unknown as (
+                input: string,
+                query: { period1: Date; period2: Date; interval: "1d" },
+            ) => Promise<ChartResult>
+        )(symbol, {
+            period1,
+            period2,
+            interval: "1d",
+        })) as ChartResult;
+
+        const chartCloses = (chart.quotes ?? [])
+            .map((entry) => toNumber(entry.close))
+            .filter((close): close is number => close !== null);
+
+        if (chartCloses.length > 0) {
+            return chartCloses;
+        }
+    } catch {
+        // Fallback handled below.
+    }
+
+    const historical = (await (
+        yahooFinance.historical as unknown as (
+            input: string,
+            query: { period1: Date; period2: Date; interval: "1d" },
+            options?: { validateResult?: boolean },
+        ) => Promise<HistoricalEntry[]>
+    )(symbol, {
+        period1,
+        period2,
+        interval: "1d",
+    }, {
+        validateResult: false,
+    })) as HistoricalEntry[];
+
+    return historical
+        .map((entry) => toNumber(entry.close))
+        .filter((close): close is number => close !== null);
+};
+
 export const getStockAnalysis = tool({
     description:
         "Provides fundamental and technical analysis for an NSE/BSE stock using Yahoo Finance summary and historical data.",
@@ -119,28 +181,17 @@ export const getStockAnalysis = tool({
             await new Promise((resolve) => setTimeout(resolve, 500));
 
 
-            const period2 = new Date();
-            const period1 = new Date();
-            period1.setDate(period2.getDate() - 80);
-
-            const historical = (await yahooFinance.historical(symbol, {
-                period1,
-                period2,
-                interval: "1d",
-            })) as HistoricalEntry[];
-
-            const closes = historical
-                .map((entry) => toNumber(entry.close))
-                .filter((close): close is number => close !== null)
-                .slice(-50);
+            const closes = (await getRecentCloses(symbol)).slice(-50);
 
             const sma20 = calculateSMA(closes, 20);
             const sma50 = calculateSMA(closes, 50);
             const rsi = calculateRSI14(closes);
             const macdSignal =
-                sma20 !== null && sma50 !== null && sma20 > sma50
-                    ? "Bullish"
-                    : "Bearish";
+                sma20 !== null && sma50 !== null
+                    ? sma20 > sma50
+                        ? "Bullish"
+                        : "Bearish"
+                    : "N/A";
 
             const latestTrend = quoteSummary.recommendationTrend?.trend?.[0] ?? {};
             const strongBuy = toNumber(latestTrend.strongBuy) ?? 0;
@@ -157,6 +208,61 @@ export const getStockAnalysis = tool({
 
             const roeRaw = toNumber(quoteSummary.financialData?.returnOnEquity);
             const dividendYieldRaw = toNumber(quoteSummary.summaryDetail?.dividendYield);
+            const currentPrice = toNumber(quoteSummary.price?.regularMarketPrice);
+            const targetPrice = toNumber(quoteSummary.financialData?.targetMeanPrice);
+            const weekHigh52 = toNumber(quoteSummary.summaryDetail?.fiftyTwoWeekHigh);
+            const weekLow52 = toNumber(quoteSummary.summaryDetail?.fiftyTwoWeekLow);
+
+            const trendBullish = sma20 !== null && sma50 !== null && sma20 > sma50;
+            const oversold = rsi !== null && rsi < 35;
+            const overbought = rsi !== null && rsi > 70;
+
+            let buyLow: number | null = null;
+            let buyHigh: number | null = null;
+            let stopLoss: number | null = null;
+            let primaryTarget: number | null = null;
+            let stretchTarget: number | null = null;
+            let riskReward: string = "N/A";
+            let timingNote = "Wait for price confirmation with healthy volume before taking a position.";
+
+            if (currentPrice !== null) {
+                if (oversold) {
+                    buyLow = currentPrice * 0.98;
+                    buyHigh = currentPrice;
+                    timingNote = "RSI is near oversold. Consider staggered buying over 3-5 sessions around support.";
+                } else if (overbought) {
+                    buyLow = currentPrice * 0.95;
+                    buyHigh = currentPrice * 0.97;
+                    timingNote = "RSI is elevated. Prefer buying on a 3-5% pullback instead of chasing.";
+                } else if (trendBullish) {
+                    buyLow = (sma20 ?? currentPrice) * 0.99;
+                    buyHigh = (sma20 ?? currentPrice) * 1.01;
+                    timingNote = "Trend is constructive. Best entries are on dips near SMA20.";
+                } else {
+                    buyLow = currentPrice * 0.95;
+                    buyHigh = currentPrice * 0.98;
+                    timingNote = "Trend is mixed. Accumulate gradually near support or after breakout confirmation.";
+                }
+
+                stopLoss = buyLow * 0.96;
+                if (weekLow52 !== null) {
+                    stopLoss = Math.min(stopLoss, weekLow52 * 0.99);
+                }
+
+                primaryTarget = targetPrice ?? currentPrice * 1.08;
+                stretchTarget =
+                    weekHigh52 !== null && weekHigh52 > primaryTarget
+                        ? weekHigh52
+                        : currentPrice * 1.15;
+
+                if (buyHigh > (stopLoss ?? 0) && primaryTarget > buyHigh) {
+                    const downside = buyHigh - (stopLoss ?? 0);
+                    const upside = primaryTarget - buyHigh;
+                    if (downside > 0) {
+                        riskReward = `1:${(upside / downside).toFixed(2)}`;
+                    }
+                }
+            }
 
             return {
                 symbol,
@@ -164,7 +270,7 @@ export const getStockAnalysis = tool({
                     quoteSummary.price?.shortName ??
                     quoteSummary.price?.longName ??
                     symbol,
-                currentPrice: toNumber(quoteSummary.price?.regularMarketPrice),
+                currentPrice,
                 change: toNumber(quoteSummary.price?.regularMarketChange),
                 changePercent: toNumber(quoteSummary.price?.regularMarketChangePercent),
                 pe: toNumber(quoteSummary.defaultKeyStatistics?.trailingPE),
@@ -177,12 +283,24 @@ export const getStockAnalysis = tool({
                         ? `${(dividendYieldRaw * 100).toFixed(2)}%`
                         : "N/A",
                 avgVolume: toNumber(quoteSummary.summaryDetail?.averageVolume),
+                fiftyTwoWeekHigh: weekHigh52,
+                fiftyTwoWeekLow: weekLow52,
+                marketCap: toNumber(quoteSummary.summaryDetail?.marketCap),
                 sma20,
                 sma50,
                 rsi,
                 macdSignal,
                 recommendation,
-                targetPrice: toNumber(quoteSummary.financialData?.targetMeanPrice),
+                targetPrice,
+                timingNote,
+                buyZone:
+                    buyLow !== null && buyHigh !== null
+                        ? `${formatLevel(buyLow)} - ${formatLevel(buyHigh)}`
+                        : "N/A",
+                stopLoss: formatLevel(stopLoss),
+                target1: formatLevel(primaryTarget),
+                target2: formatLevel(stretchTarget),
+                riskReward,
                 analystSummary: `Analyst trend - Strong Buy: ${strongBuy}, Buy: ${buy}, Hold: ${hold}, Sell: ${sell}`,
             };
         } catch (error) {

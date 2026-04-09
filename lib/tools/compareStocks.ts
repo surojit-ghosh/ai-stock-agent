@@ -1,15 +1,14 @@
 import { tool } from "ai";
-import YahooFinance from "yahoo-finance2";
-const yahooFinance = new YahooFinance({
-    suppressNotices: ["yahooSurvey"],
-});
 import { z } from "zod";
+
+import { yahooFinance } from "./yahooFinance";
 
 type QuoteSummaryResult = {
     price?: {
         shortName?: string | null;
         longName?: string | null;
         regularMarketPrice?: number | null;
+        regularMarketChangePercent?: number | null;
     } | null;
     defaultKeyStatistics?: {
         trailingPE?: number | null;
@@ -63,6 +62,7 @@ export const compareStocks = tool({
                 symbol: string;
                 name: string;
                 currentPrice: number | null;
+                changePct: number;
                 pe: number | null;
                 pb: number | null;
                 marketCap: string;
@@ -80,6 +80,7 @@ export const compareStocks = tool({
                 }, { validateResult: false })) as QuoteSummaryResult;
 
                 const currentPrice = toNumber(summary.price?.regularMarketPrice);
+                const changePct = toNumber(summary.price?.regularMarketChangePercent);
                 const pe = toNumber(summary.defaultKeyStatistics?.trailingPE);
                 const pb = toNumber(summary.defaultKeyStatistics?.priceToBook);
                 const beta = toNumber(summary.defaultKeyStatistics?.beta);
@@ -97,6 +98,7 @@ export const compareStocks = tool({
                     symbol,
                     name: summary.price?.shortName ?? summary.price?.longName ?? symbol,
                     currentPrice,
+                    changePct: changePct ?? 0,
                     pe,
                     pb,
                     marketCap: formatMarketCapInCrores(marketCap),

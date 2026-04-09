@@ -1,10 +1,8 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, tool } from "ai";
-import YahooFinance from "yahoo-finance2";
-const yahooFinance = new YahooFinance({
-    suppressNotices: ["yahooSurvey"],
-});
 import { z } from "zod";
+
+import { yahooFinance } from "./yahooFinance";
 
 type YahooSearchNewsItem = {
     title?: string;

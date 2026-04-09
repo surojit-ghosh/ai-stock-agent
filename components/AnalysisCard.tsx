@@ -21,32 +21,38 @@ type Recommendation = "BUY" | "HOLD" | "SELL";
 export interface AnalysisCardProps {
     symbol: string;
     name: string;
-    price: number;
-    change: number;
-    changePct: number;
-    high: number;
-    low: number;
-    high52w: number;
-    low52w: number;
+    price: number | null;
+    change: number | null;
+    changePct: number | null;
+    high: number | null;
+    low: number | null;
+    high52w: number | null;
+    low52w: number | null;
     volume: string;
     marketCap: string;
-    pe: number;
-    pb: number;
+    pe: number | null;
+    pb: number | null;
     roe: string;
-    eps: number;
-    beta: number;
+    eps: number | null;
+    beta: number | null;
     dividendYield: string;
-    rsi: number;
-    sma20: number;
-    sma50: number;
+    rsi: number | null;
+    sma20: number | null;
+    sma50: number | null;
     macdSignal: string;
     recommendation: Recommendation;
-    targetPrice: number;
+    targetPrice: number | null;
+    timingNote: string;
+    buyZone: string;
+    stopLoss: string;
+    target1: string;
+    target2: string;
+    riskReward: string;
     analystSummary: string;
 }
 
-const formatNumber = (value: number, digits = 2) =>
-    Number.isFinite(value)
+const formatNumber = (value: number | null | undefined, digits = 2) =>
+    typeof value === "number" && Number.isFinite(value)
         ? value.toLocaleString("en-IN", {
               minimumFractionDigits: digits,
               maximumFractionDigits: digits,
@@ -90,9 +96,7 @@ function MetricRow({
                     <p className="max-w-56 text-xs">{tip}</p>
                 </TooltipContent>
             </Tooltip>
-            <span className="font-medium text-stock-text">
-                {value}
-            </span>
+            <span className="font-medium text-stock-text">{value}</span>
         </div>
     );
 }
@@ -115,9 +119,17 @@ export function AnalysisCard(props: AnalysisCardProps) {
         sma50,
         macdSignal,
         analystSummary,
+        timingNote,
+        buyZone,
+        stopLoss,
+        target1,
+        target2,
+        riskReward,
     } = props;
 
-    const rsiValue = Math.max(0, Math.min(100, Number.isFinite(rsi) ? rsi : 0));
+    const safeRsi =
+        typeof rsi === "number" && Number.isFinite(rsi) ? rsi : null;
+    const rsiValue = Math.max(0, Math.min(100, safeRsi ?? 50));
     const radius = 42;
     const circumference = 2 * Math.PI * radius;
     const progress = (rsiValue / 100) * circumference;
@@ -147,9 +159,22 @@ export function AnalysisCard(props: AnalysisCardProps) {
                             ₹{formatNumber(price)}
                         </span>
                         <ArrowRight className="h-4 w-4 text-stock-muted" />
-                        <span className="font-mono text-lg font-medium text-stock-muted">
-                            Target: <span className="font-bold text-white">₹{formatNumber(targetPrice)}</span>
-                        </span>
+                        {targetPrice !== null &&
+                        Number.isFinite(targetPrice) ? (
+                            <span className="font-mono text-lg font-medium text-stock-muted">
+                                Target:{" "}
+                                <span className="font-bold text-white">
+                                    ₹{formatNumber(targetPrice)}
+                                </span>
+                            </span>
+                        ) : (
+                            <span className="font-mono text-lg font-medium text-stock-muted">
+                                Target:{" "}
+                                <span className="font-bold text-white">
+                                    N/A
+                                </span>
+                            </span>
+                        )}
                     </div>
                 </CardHeader>
 
@@ -201,7 +226,7 @@ export function AnalysisCard(props: AnalysisCardProps) {
                                         RSI (14)
                                     </span>
                                     <span className="font-mono text-sm font-semibold text-white">
-                                        {formatNumber(rsi, 1)}
+                                        {formatNumber(safeRsi, 1)}
                                     </span>
                                 </div>
                                 <div className="grid place-items-center">
@@ -256,7 +281,10 @@ export function AnalysisCard(props: AnalysisCardProps) {
                                     className={
                                         macdSignal.toLowerCase() === "bullish"
                                             ? "border-stock-green/30 bg-stock-green/10 text-stock-green font-mono uppercase tracking-wider backdrop-blur-sm text-[10px]"
-                                            : "border-stock-red/30 bg-stock-red/10 text-stock-red font-mono uppercase tracking-wider backdrop-blur-sm text-[10px]"
+                                            : macdSignal.toLowerCase() ===
+                                                "bearish"
+                                              ? "border-stock-red/30 bg-stock-red/10 text-stock-red font-mono uppercase tracking-wider backdrop-blur-sm text-[10px]"
+                                              : "border-white/15 bg-white/5 text-stock-muted font-mono uppercase tracking-wider backdrop-blur-sm text-[10px]"
                                     }
                                 >
                                     {macdSignal}
@@ -266,6 +294,42 @@ export function AnalysisCard(props: AnalysisCardProps) {
                     </div>
 
                     <Separator className="bg-white/10" />
+
+                    <section className="space-y-3 rounded-lg border border-stock-accent/20 bg-stock-accent/5 p-4">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-stock-accent">
+                            Entry Plan (Technical)
+                        </h4>
+                        <p className="text-sm leading-relaxed text-white/85">
+                            {timingNote}
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <MetricRow
+                                label="Buy Zone"
+                                value={buyZone}
+                                tip="Preferred accumulation range based on trend and momentum context."
+                            />
+                            <MetricRow
+                                label="Stop Loss"
+                                value={stopLoss}
+                                tip="Risk-control level to cap downside if setup fails."
+                            />
+                            <MetricRow
+                                label="Target 1"
+                                value={target1}
+                                tip="Base upside objective from analyst target or conservative technical projection."
+                            />
+                            <MetricRow
+                                label="Target 2"
+                                value={target2}
+                                tip="Stretch target if momentum remains supportive."
+                            />
+                            <MetricRow
+                                label="Risk:Reward"
+                                value={riskReward}
+                                tip="Estimated reward potential per unit of risk from the proposed entry setup."
+                            />
+                        </div>
+                    </section>
 
                     <p className="text-center text-[10px] uppercase tracking-widest text-stock-muted/50">
                         This is for informational purposes only.

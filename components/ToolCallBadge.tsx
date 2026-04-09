@@ -14,6 +14,7 @@ const TOOL_LABELS: Record<string, string> = {
     getMarketIndex: "📊 Loading Index",
     getStockNews: "📰 Fetching News",
     compareStocks: "⚖️ Comparing Stocks",
+    getAIInsight: "🧠 AI Deep Analysis",
 };
 
 const getLabel = (toolName: string) =>
